@@ -70,8 +70,6 @@ export default function SettingsPage() {
 
     const handleEnable2FA = async () => {
         setTwoFALoading(true);
-        setError("");
-        setSuccess("");
 
         try {
             const response = await fetch("/api/auth/2fa/enable", {
@@ -416,7 +414,6 @@ export default function SettingsPage() {
                                                 onClick={() => {
                                                     setTwoFAVerifying(false);
                                                     setTwoFACode("");
-                                                    setError("");
                                                 }}
                                                 variant="outline"
                                                 aria-label="Cancel two-factor authentication setup"
@@ -520,7 +517,6 @@ export default function SettingsPage() {
                                                     setEmailCode("");
                                                     setPendingEmail("");
                                                     setNewEmail("");
-                                                    setError("");
                                                 }}
                                                 variant="outline"
                                                 aria-label="Cancel email change"
