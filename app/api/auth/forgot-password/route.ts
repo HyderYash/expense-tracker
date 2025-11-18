@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongodb";
-import User from "@/models/User";
+import User, { IUser } from "@/models/User";
 import { sendPasswordResetCode } from "@/lib/email";
+import mongoose from "mongoose";
 
 function generateCode(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest) {
     }
 
     await connectDB();
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email: email.toLowerCase() }) as IUser | null;
 
     // Don't reveal if user exists for security reasons
     if (!user) {
@@ -36,8 +37,11 @@ export async function POST(request: NextRequest) {
 
     // Use updateOne to directly update the database - bypass Mongoose model if needed
     // First try with the model
+    // Type assertion to access _id property
+    const userObjectId = (user as IUser & { _id: mongoose.Types.ObjectId })._id;
+    const userId = new mongoose.Types.ObjectId(userObjectId.toString());
     let updateResult = await User.updateOne(
-      { _id: user._id },
+      { _id: userId },
       {
         $set: {
           passwordResetCode: code,
@@ -45,10 +49,9 @@ export async function POST(request: NextRequest) {
         },
       }
     );
-    
+
     // If that didn't work, try using the collection directly
     if (updateResult.modifiedCount === 0) {
-      const mongoose = (await import("mongoose")).default;
       // Get the collection name from the model
       const collectionName = User.collection.name;
       if (!mongoose.connection.db) {
@@ -58,8 +61,9 @@ export async function POST(request: NextRequest) {
         );
       }
       const collection = mongoose.connection.db.collection(collectionName);
+      // Use the already converted userId
       const directResult = await collection.updateOne(
-        { _id: user._id },
+        { _id: userId },
         {
           $set: {
             passwordResetCode: code,
@@ -90,8 +94,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch fresh from DB to verify it was actually saved
-    const updatedUser = await User.findById(user._id);
-    
+    const updatedUser = await User.findById(userId) as IUser | null;
+
     if (!updatedUser) {
       return NextResponse.json(
         { success: false, error: "Failed to save reset code. Please try again." },
@@ -100,8 +104,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify the code was saved
+    // Type assertion to access _id property
+    const userDoc = updatedUser as IUser & { _id: mongoose.Types.ObjectId };
     console.log("Password reset code saved:", {
-      userId: updatedUser._id.toString(),
+      userId: userDoc._id.toString(),
       email: updatedUser.email,
       code: code,
       savedCode: updatedUser.passwordResetCode,
@@ -109,7 +115,7 @@ export async function POST(request: NextRequest) {
       codesMatch: updatedUser.passwordResetCode === code,
       allFields: Object.keys(updatedUser.toObject()),
     });
-    
+
     // Double check with a direct query using lean
     const directCheck = await User.findOne({ email: user.email }).lean();
     console.log("Direct DB query check:", {

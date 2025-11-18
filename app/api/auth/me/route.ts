@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import connectDB from "@/lib/mongodb";
-import User from "@/models/User";
+import User, { IUser } from "@/models/User";
+import mongoose from "mongoose";
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
     }
 
     await connectDB();
-    const user = await User.findById(tokenData.userId).select("-password");
+    const user = await User.findById(tokenData.userId).select("-password") as (IUser & { _id: mongoose.Types.ObjectId }) | null;
 
     if (!user) {
       return NextResponse.json(

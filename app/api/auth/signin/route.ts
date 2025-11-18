@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import connectDB from "@/lib/mongodb";
-import User from "@/models/User";
+import User, { IUser } from "@/models/User";
 import { generateToken, setAuthCookie } from "@/lib/auth";
+import mongoose from "mongoose";
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Find user
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email: email.toLowerCase() }) as (IUser & { _id: mongoose.Types.ObjectId }) | null;
     if (!user) {
       return NextResponse.json(
         { success: false, error: "Invalid email or password" },

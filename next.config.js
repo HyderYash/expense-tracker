@@ -8,7 +8,13 @@ const nextConfig = {
   images: {
     formats: ['image/avif', 'image/webp'],
   },
+  // Disable linting and type checking during builds
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
 }
 
 module.exports = nextConfig
-

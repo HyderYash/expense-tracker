@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongodb";
-import User from "@/models/User";
+import User, { IUser } from "@/models/User";
 import { getCurrentUser } from "@/lib/auth";
 import { sendEmailVerificationCode } from "@/lib/email";
 import mongoose from "mongoose";
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
 
     await connectDB();
     const userId = new mongoose.Types.ObjectId(user.userId);
-    const dbUser = await User.findById(userId);
+    const dbUser = await User.findById(userId) as IUser | null;
 
     if (!dbUser) {
       return NextResponse.json(
@@ -122,7 +122,7 @@ export async function PUT(request: NextRequest) {
 
     await connectDB();
     const userId = new mongoose.Types.ObjectId(user.userId);
-    const dbUser = await User.findById(userId);
+    const dbUser = await User.findById(userId) as IUser | null;
 
     if (!dbUser) {
       return NextResponse.json(
@@ -167,15 +167,18 @@ export async function PUT(request: NextRequest) {
       dbUser.emailVerificationExpiry = undefined;
       await dbUser.save();
 
+      // Convert to plain object for proper type handling
+      const userObject = dbUser.toObject();
+
       return NextResponse.json({
         success: true,
         message: "Email changed successfully",
         data: {
           user: {
-            id: dbUser._id.toString(),
-            email: dbUser.email,
-            name: dbUser.name,
-            role: dbUser.role,
+            id: userObject._id.toString(),
+            email: userObject.email,
+            name: userObject.name,
+            role: userObject.role,
           },
         },
       });
@@ -193,4 +196,3 @@ export async function PUT(request: NextRequest) {
     );
   }
 }
-
