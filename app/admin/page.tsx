@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -47,25 +47,7 @@ export default function AdminPage() {
     description: "",
   });
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
-    try {
-      const response = await fetch("/api/auth/me");
-      if (response.ok) {
-        fetchCategories();
-      } else {
-        router.push("/signin");
-      }
-    } catch (error) {
-      console.error("Error checking auth:", error);
-      router.push("/signin");
-    }
-  };
-
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch("/api/categories");
@@ -78,7 +60,25 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const checkAuth = useCallback(async () => {
+    try {
+      const response = await fetch("/api/auth/me");
+      if (response.ok) {
+        fetchCategories();
+      } else {
+        router.push("/signin");
+      }
+    } catch (error) {
+      console.error("Error checking auth:", error);
+      router.push("/signin");
+    }
+  }, [fetchCategories, router]);
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
 
   const generateSlug = (name: string) => {
     if (!name) return "";

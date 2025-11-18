@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import { showToast } from "@/lib/toast";
@@ -98,11 +98,11 @@ export default function DashboardPage() {
     }
   };
 
-  const getCategoryValue = (categoryName: string) => {
+  const getCategoryValue = useCallback((categoryName: string) => {
     const category = categories.find((cat) => cat.name === categoryName);
     if (!category) return 0;
     return category.entries.reduce((sum, entry) => sum + entry.invested, 0);
-  };
+  }, [categories]);
 
   const getTotalInvestment = () => {
     return categories.reduce(
@@ -153,7 +153,7 @@ export default function DashboardPage() {
         currentValue: cat.currentValue,
       };
     });
-  }, [categories]);
+  }, [categories, getCategoryValue]);
 
   // Filter data based on search query
   const filteredData = useMemo(() => {

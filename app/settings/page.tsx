@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,11 +46,7 @@ export default function SettingsPage() {
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-    useEffect(() => {
-        fetchUser();
-    }, []);
-
-    const fetchUser = async () => {
+    const fetchUser = useCallback(async () => {
         try {
             const response = await fetch("/api/auth/me");
             const result = await response.json();
@@ -66,7 +62,11 @@ export default function SettingsPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [router]);
+
+    useEffect(() => {
+        fetchUser();
+    }, [fetchUser]);
 
     const handleEnable2FA = async () => {
         setTwoFALoading(true);

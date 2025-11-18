@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { formatCurrency } from "@/lib/utils";
 import { showToast } from "@/lib/toast";
@@ -61,11 +61,7 @@ export default function CategoryPage() {
   const [categoryEditValues, setCategoryEditValues] = useState({ displayName: "" });
   const [showStatsCards, setShowStatsCards] = useState(false); // Mobile only - hide by default
 
-  useEffect(() => {
-    fetchCategory();
-  }, [slug]);
-
-  const fetchCategory = async () => {
+  const fetchCategory = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch(`/api/categories/${slug}`);
@@ -87,7 +83,11 @@ export default function CategoryPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [slug]);
+
+  useEffect(() => {
+    fetchCategory();
+  }, [fetchCategory]);
 
 
   const handleAdd = async () => {
@@ -470,8 +470,8 @@ export default function CategoryPage() {
               className="h-full"
             >
               <Card className={`border-0 shadow-md hover:shadow-lg transition-shadow h-full ${profitLoss >= 0
-                  ? "bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-900/30 dark:to-emerald-800/30"
-                  : "bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-900/30 dark:to-red-800/30"
+                ? "bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-900/30 dark:to-emerald-800/30"
+                : "bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-900/30 dark:to-red-800/30"
                 }`}>
                 <CardContent className="p-4 sm:p-4 lg:p-6 h-full flex flex-col">
                   <div className="flex items-center justify-between flex-1">
