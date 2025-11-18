@@ -51,6 +51,12 @@ export async function POST(request: NextRequest) {
       const mongoose = (await import("mongoose")).default;
       // Get the collection name from the model
       const collectionName = User.collection.name;
+      if (!mongoose.connection.db) {
+        return NextResponse.json(
+          { success: false, error: "Database connection not available. Please try again." },
+          { status: 500 }
+        );
+      }
       const collection = mongoose.connection.db.collection(collectionName);
       const directResult = await collection.updateOne(
         { _id: user._id },
