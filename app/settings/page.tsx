@@ -762,19 +762,41 @@ export default function SettingsPage() {
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50">
                                     <div className="flex-1">
                                         <p className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
-                                            {showInstallButton ? "Available for Installation" : window.matchMedia('(display-mode: standalone)').matches ? "App Installed" : "Not Available"}
+                                            {(() => {
+                                                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+                                                const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+                                                
+                                                if (isStandalone) {
+                                                    return "App Installed";
+                                                } else if (isIOS) {
+                                                    return "Install on iOS";
+                                                } else if (showInstallButton) {
+                                                    return "Available for Installation";
+                                                } else {
+                                                    return "Install App";
+                                                }
+                                            })()}
                                         </p>
                                         <p className="text-sm text-muted-foreground">
-                                            {showInstallButton
-                                                ? "Install this app on your device for a better experience"
-                                                : window.matchMedia('(display-mode: standalone)').matches
-                                                ? "This app is already installed on your device"
-                                                : "Install prompt is not available. The app may already be installed or your browser doesn't support PWA installation."}
+                                            {(() => {
+                                                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+                                                const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+                                                
+                                                if (isStandalone) {
+                                                    return "This app is already installed on your device";
+                                                } else if (isIOS) {
+                                                    return "Tap the Share button in Safari, then select 'Add to Home Screen' to install this app.";
+                                                } else if (showInstallButton) {
+                                                    return "Install this app on your device for a better experience";
+                                                } else {
+                                                    return "Install prompt is not available. The app may already be installed or your browser doesn't support PWA installation.";
+                                                }
+                                            })()}
                                         </p>
                                     </div>
                                 </div>
 
-                                {showInstallButton && (
+                                {showInstallButton && !(/iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream) && (
                                     <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                                         <Button
                                             onClick={handleInstallClick}
