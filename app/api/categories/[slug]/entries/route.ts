@@ -19,7 +19,7 @@ export async function POST(
 
     await connectDB();
     const body = await request.json();
-    const { name, quantity, invested } = body;
+    const { name, quantity, invested, currentValue, expectedPercent } = body;
     const userId = new mongoose.Types.ObjectId(user.userId);
 
     if (!name || quantity === undefined || invested === undefined) {
@@ -41,7 +41,24 @@ export async function POST(
       );
     }
 
-    category.entries.push({ name, quantity, invested });
+    const newEntry: any = { name, quantity, invested };
+    if (currentValue !== undefined && currentValue !== null) {
+      newEntry.currentValue = currentValue;
+    }
+    // Default to 10% if not provided
+    newEntry.expectedPercent = (expectedPercent !== undefined && expectedPercent !== null) ? expectedPercent : 10;
+    category.entries.push(newEntry);
+    
+    // Update category currentValue to be sum of all entry currentValues
+    // Only count entries that have currentValue explicitly set (including 0)
+    const totalCurrentValue = category.entries.reduce((sum, entry) => {
+      if (entry.currentValue !== undefined && entry.currentValue !== null) {
+        return sum + entry.currentValue;
+      }
+      return sum;
+    }, 0);
+    category.currentValue = totalCurrentValue;
+    
     await category.save();
 
     return NextResponse.json({ success: true, data: category }, { status: 201 });
@@ -68,7 +85,7 @@ export async function PUT(
 
     await connectDB();
     const body = await request.json();
-    const { entryIndex, name, quantity, invested } = body;
+    const { entryIndex, name, quantity, invested, currentValue, expectedPercent } = body;
     const userId = new mongoose.Types.ObjectId(user.userId);
 
     if (entryIndex === undefined) {
@@ -100,6 +117,24 @@ export async function PUT(
     if (name !== undefined) category.entries[entryIndex].name = name;
     if (quantity !== undefined) category.entries[entryIndex].quantity = quantity;
     if (invested !== undefined) category.entries[entryIndex].invested = invested;
+    // Allow null to explicitly clear the currentValue, and allow 0 as a valid value
+    if (currentValue !== undefined) {
+      category.entries[entryIndex].currentValue = currentValue === null ? undefined : currentValue;
+    }
+    // Allow null to explicitly clear the expectedPercent, and allow 0 as a valid value
+    if (expectedPercent !== undefined) {
+      category.entries[entryIndex].expectedPercent = expectedPercent === null ? undefined : expectedPercent;
+    }
+
+    // Update category currentValue to be sum of all entry currentValues
+    // Only count entries that have currentValue explicitly set (including 0)
+    const totalCurrentValue = category.entries.reduce((sum, entry) => {
+      if (entry.currentValue !== undefined && entry.currentValue !== null) {
+        return sum + entry.currentValue;
+      }
+      return sum;
+    }, 0);
+    category.currentValue = totalCurrentValue;
 
     await category.save();
 
@@ -157,6 +192,17 @@ export async function DELETE(
     }
 
     category.entries.splice(entryIndex, 1);
+    
+    // Update category currentValue to be sum of all entry currentValues
+    // Only count entries that have currentValue explicitly set (including 0)
+    const totalCurrentValue = category.entries.reduce((sum, entry) => {
+      if (entry.currentValue !== undefined && entry.currentValue !== null) {
+        return sum + entry.currentValue;
+      }
+      return sum;
+    }, 0);
+    category.currentValue = totalCurrentValue;
+    
     await category.save();
 
     return NextResponse.json({ success: true, data: category });

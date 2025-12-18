@@ -3,7 +3,6 @@ import { Inter } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
-import { PWAInstaller } from "@/components/pwa-installer";
 import { Toaster } from "@/components/toaster";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -93,6 +92,7 @@ export const metadata: Metadata = {
     "mobile-web-app-capable": "yes",
     "apple-mobile-web-app-capable": "yes",
     "apple-mobile-web-app-status-bar-style": "black-translucent",
+    "apple-mobile-web-app-orientation": "all",
   },
   alternates: {
     canonical: baseUrl,
@@ -151,7 +151,6 @@ export default function RootLayout({
         />
         <ThemeProvider>
           {children}
-          <PWAInstaller />
           <Toaster />
         </ThemeProvider>
       </body>

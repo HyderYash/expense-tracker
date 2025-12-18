@@ -46,11 +46,39 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip cross-origin requests
+  // Skip cross-origin requests - ensure everything stays within app scope
   if (!event.request.url.startsWith(self.location.origin)) {
     return;
   }
 
+  // Handle navigation requests (HTML pages) - ensure they stay in app
+  if (event.request.mode === 'navigate' || event.request.destination === 'document') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          // Clone the response for caching
+          const responseToCache = response.clone();
+          
+          // Cache all navigation requests to keep them in app
+          if (response && response.status === 200 && response.type === 'basic') {
+            caches.open(RUNTIME_CACHE).then((cache) => {
+              cache.put(event.request, responseToCache);
+            });
+          }
+          
+          return response;
+        })
+        .catch(() => {
+          // Fallback to cached version or home page
+          return caches.match(event.request).then((cachedResponse) => {
+            return cachedResponse || caches.match('/');
+          });
+        })
+    );
+    return;
+  }
+
+  // Handle other requests (API, assets, etc.)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
@@ -72,7 +100,8 @@ self.addEventListener('fetch', (event) => {
             event.request.url.includes('/api/') ||
             event.request.destination === 'image' ||
             event.request.destination === 'script' ||
-            event.request.destination === 'style'
+            event.request.destination === 'style' ||
+            event.request.destination === 'font'
           ) {
             caches.open(RUNTIME_CACHE).then((cache) => {
               cache.put(event.request, responseToCache);
@@ -82,7 +111,7 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => {
-          // Return offline page if available
+          // Return offline page if available for document requests
           if (event.request.destination === 'document') {
             return caches.match('/');
           }

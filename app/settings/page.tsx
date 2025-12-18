@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Navigation } from "@/components/navigation";
 import { showToast } from "@/lib/toast";
-import { Loader2, Settings, Shield, Mail, Check, X, AlertCircle, Key, Eye, EyeOff } from "lucide-react";
+import { Loader2, Settings, Shield, Mail, Check, X, AlertCircle, Key, Eye, EyeOff, Download } from "lucide-react";
 
 interface UserData {
     id: string;
@@ -45,6 +45,76 @@ export default function SettingsPage() {
     const [showCurrentPassword, setShowCurrentPassword] = useState(false);
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+    // PWA Install states
+    const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+    const [showInstallButton, setShowInstallButton] = useState(false);
+
+    // PWA Install handler
+    useEffect(() => {
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker
+                    .register('/sw.js')
+                    .then((registration) => {
+                        console.log('Service Worker registered:', registration);
+                        
+                        // Check for updates
+                        registration.addEventListener('updatefound', () => {
+                            const newWorker = registration.installing;
+                            if (newWorker) {
+                                newWorker.addEventListener('statechange', () => {
+                                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                        // New service worker available
+                                        if (confirm('New version available! Reload to update?')) {
+                                            window.location.reload();
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    })
+                    .catch((error) => {
+                        console.error('Service Worker registration failed:', error);
+                    });
+            });
+        }
+
+        // Handle PWA install prompt
+        const handleBeforeInstallPrompt = (e: Event) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+            setShowInstallButton(true);
+        };
+
+        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+        // Check if app is already installed
+        if (window.matchMedia('(display-mode: standalone)').matches) {
+            setShowInstallButton(false);
+        }
+
+        return () => {
+            window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        };
+    }, []);
+
+    const handleInstallClick = async () => {
+        if (!deferredPrompt) return;
+
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        
+        if (outcome === 'accepted') {
+            showToast.success("App installing", "The app is being installed");
+        } else {
+            showToast.error("Install cancelled", "App installation was cancelled");
+        }
+        
+        setDeferredPrompt(null);
+        setShowInstallButton(false);
+    };
 
     const fetchUser = useCallback(async () => {
         try {
@@ -670,6 +740,52 @@ export default function SettingsPage() {
                                         )}
                                     </Button>
                                 </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Install App */}
+                        <Card className="shadow-lg border-0 bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl h-fit">
+                            <CardHeader className="pb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-primary/10">
+                                        <Download className="h-5 w-5 text-primary" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <CardTitle className="text-lg text-gray-900 dark:text-gray-100">Install App</CardTitle>
+                                        <CardDescription className="text-xs mt-1">
+                                            Install this app on your device
+                                        </CardDescription>
+                                    </div>
+                                </div>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+                                    <div className="flex-1">
+                                        <p className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                                            {showInstallButton ? "Available for Installation" : window.matchMedia('(display-mode: standalone)').matches ? "App Installed" : "Not Available"}
+                                        </p>
+                                        <p className="text-sm text-muted-foreground">
+                                            {showInstallButton
+                                                ? "Install this app on your device for a better experience"
+                                                : window.matchMedia('(display-mode: standalone)').matches
+                                                ? "This app is already installed on your device"
+                                                : "Install prompt is not available. The app may already be installed or your browser doesn't support PWA installation."}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {showInstallButton && (
+                                    <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                                        <Button
+                                            onClick={handleInstallClick}
+                                            className="w-full sm:w-auto"
+                                            aria-label="Install app"
+                                        >
+                                            <Download className="h-4 w-4 mr-2" />
+                                            Install App
+                                        </Button>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </div>

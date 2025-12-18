@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import { showToast } from "@/lib/toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Navigation } from "@/components/navigation";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from "recharts";
 import { motion } from "framer-motion";
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, X, Loader2, Pencil, Check, ExternalLink, TrendingUp, Target, Download } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, X, Loader2, ExternalLink, TrendingUp, Target, Download, ChevronDown, ChevronRight } from "lucide-react";
 import { exportToCSV, CategoryExport } from "@/lib/export";
 
 // Enhanced color palette with gradients
@@ -54,7 +55,7 @@ function parseFormattedNumber(value: string): number {
   return parseFloat(numStr) || 0;
 }
 
-type SortField = "name" | "valueFromC20" | "expectedPercent" | "expectedAmt" | "profitLoss" | "currentValue";
+type SortField = "name" | "valueFromC20" | "expectedPercent" | "expectedAmt" | "profitLoss";
 type SortDirection = "asc" | "desc" | null;
 
 interface Category {
@@ -63,20 +64,20 @@ interface Category {
   slug: string;
   expectedPercent: number;
   currentValue: number;
-  entries: Array<{ name: string; quantity: number; invested: number }>;
+  entries: Array<{ name: string; quantity: number; invested: number; currentValue?: number; expectedPercent?: number }>;
   displayName?: string;
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [categories, setCategories] = useState<Category[]>([]);
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [editingSlug, setEditingSlug] = useState<string | null>(null);
-  const [editingValues, setEditingValues] = useState<Record<string, { expectedPercent: string; currentValue: string }>>({});
   const [saving, setSaving] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setMounted(true);
@@ -111,26 +112,52 @@ export default function DashboardPage() {
     );
   };
 
-  const getAvgExpectedPercent = () => {
-    if (categories.length === 0) return 0;
-    const sum = categories.reduce((s, cat) => s + cat.expectedPercent, 0);
-    return sum / categories.length;
+  const getTotalProfitLoss = () => {
+    return categories.reduce((sum, cat) => {
+      const totalInvested = cat.entries.reduce((s, e) => s + e.invested, 0);
+      return sum + (cat.currentValue - totalInvested); // Returns = Current Value - Invested Amount
+    }, 0);
+  };
+
+  // Calculate weighted expected percentage for a category based on its entries
+  const getCategoryExpectedPercent = (cat: Category): number => {
+    const totalInvested = cat.entries.reduce((sum, entry) => sum + entry.invested, 0);
+    if (totalInvested === 0) return 10; // Default to 10% if no investments
+
+    // Calculate weighted average based on invested amounts
+    const weightedSum = cat.entries.reduce((sum, entry) => {
+      const expectedPercent = entry.expectedPercent ?? 10; // Default to 10% if not set
+      return sum + (entry.invested * expectedPercent);
+    }, 0);
+
+    return weightedSum / totalInvested;
   };
 
   const getTotalExpected = () => {
     return categories.reduce((sum, cat) => {
-      const valueFromC20 = cat.entries.reduce((s, e) => s + e.invested, 0);
-      const expectedAmt = valueFromC20 * (1 + cat.expectedPercent / 100);
+      const totalInvested = cat.entries.reduce((s, e) => s + e.invested, 0);
+      const expectedPercent = getCategoryExpectedPercent(cat);
+      const expectedAmt = totalInvested * (1 + expectedPercent / 100);
       return sum + expectedAmt;
     }, 0);
   };
 
-  const getTotalProfitLoss = () => {
-    return categories.reduce((sum, cat) => {
-      const valueFromC20 = cat.entries.reduce((s, e) => s + e.invested, 0);
-      const expectedAmt = valueFromC20 * (1 + cat.expectedPercent / 100);
-      return sum + (cat.currentValue - expectedAmt);
+  const getAvgExpectedPercent = () => {
+    if (categories.length === 0) return 0;
+    const totalInvested = categories.reduce((sum, cat) => {
+      return sum + cat.entries.reduce((s, e) => s + e.invested, 0);
     }, 0);
+
+    if (totalInvested === 0) return 10;
+
+    // Calculate overall weighted average
+    const weightedSum = categories.reduce((sum, cat) => {
+      const catInvested = cat.entries.reduce((s, e) => s + e.invested, 0);
+      const catExpectedPercent = getCategoryExpectedPercent(cat);
+      return sum + (catInvested * catExpectedPercent);
+    }, 0);
+
+    return weightedSum / totalInvested;
   };
 
   const getTotalCurrent = () => {
@@ -140,14 +167,15 @@ export default function DashboardPage() {
   const dashboardData = useMemo(() => {
     return categories.map((cat) => {
       const valueFromC20 = getCategoryValue(cat.name);
-      const expectedAmt = valueFromC20 * (1 + cat.expectedPercent / 100);
-      const profitLoss = cat.currentValue - expectedAmt;
+      const expectedPercent = getCategoryExpectedPercent(cat);
+      const expectedAmt = valueFromC20 * (1 + expectedPercent / 100);
+      const profitLoss = cat.currentValue - valueFromC20; // Returns = Current Value - Invested Amount (like Groww)
       return {
         sheetName: cat.displayName || cat.name,
         categoryName: cat.name,
         categorySlug: cat.slug,
         valueFromC20,
-        expectedPercent: cat.expectedPercent,
+        expectedPercent,
         expectedAmt,
         profitLoss,
         currentValue: cat.currentValue,
@@ -208,7 +236,8 @@ export default function DashboardPage() {
     return categories
       .map((cat) => {
         const valueFromC20 = cat.entries.reduce((sum, entry) => sum + entry.invested, 0);
-        const expectedAmt = valueFromC20 * (1 + cat.expectedPercent / 100);
+        const expectedPercent = getCategoryExpectedPercent(cat);
+        const expectedAmt = valueFromC20 * (1 + expectedPercent / 100);
         return {
           name: (cat.displayName || cat.name).length > 10
             ? (cat.displayName || cat.name).substring(0, 10) + "..."
@@ -270,113 +299,38 @@ export default function DashboardPage() {
     return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
   };
 
-  const handleEdit = (categorySlug: string) => {
-    const category = categories.find((cat) => cat.slug === categorySlug);
-    if (!category) return;
-    setEditingSlug(categorySlug);
-    setEditingValues({
-      ...editingValues,
-      [categorySlug]: {
-        expectedPercent: category.expectedPercent.toString(),
-        currentValue: formatNumberWithCommas(category.currentValue),
-      },
-    });
-  };
-
-  const handleCancelEdit = (categorySlug: string) => {
-    setEditingSlug(null);
-    setEditingValues((prev) => {
-      const newValues = { ...prev };
-      delete newValues[categorySlug];
-      return newValues;
-    });
-  };
-
-  const handleSave = async (categorySlug: string) => {
-    const category = categories.find((cat) => cat.slug === categorySlug);
-    if (!category) return;
-    const editValues = editingValues[categorySlug];
-    if (!editValues) return;
-
-    const expectedPercent = parseFloat(editValues.expectedPercent) || 0;
-    const currentValue = parseFormattedNumber(editValues.currentValue);
-
-    if (expectedPercent < 0 || currentValue < 0) {
-      showToast.error("Invalid values", "Values cannot be negative");
-      return;
-    }
-
-    try {
-      setSaving(true);
-      const response = await fetch(`/api/categories/${categorySlug}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expectedPercent,
-          currentValue,
-        }),
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        showToast.success("Category updated", "Changes have been saved successfully");
-        await fetchCategories();
-        setEditingSlug(null);
-        setEditingValues((prev) => {
-          const newValues = { ...prev };
-          delete newValues[categorySlug];
-          return newValues;
-        });
-      } else {
-        showToast.error("Update failed", result.error || "Error updating category");
-      }
-    } catch (error) {
-      console.error("Error updating category:", error);
-      showToast.error("Update failed", "Error updating category. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleUpdateEditingValue = (categorySlug: string, field: "expectedPercent" | "currentValue", value: string) => {
-    if (field === "currentValue") {
-      let val = value.replace(/[^0-9,]/g, "");
-      const numStr = val.replace(/,/g, "");
-      if (numStr) {
-        const num = parseFloat(numStr);
-        if (!isNaN(num)) {
-          val = formatNumberWithCommas(num);
-        }
-      }
-      setEditingValues((prev) => ({
-        ...prev,
-        [categorySlug]: {
-          ...prev[categorySlug],
-          currentValue: val,
-        },
-      }));
-    } else {
-      const val = value.replace(/[^0-9.]/g, "");
-      setEditingValues((prev) => ({
-        ...prev,
-        [categorySlug]: {
-          ...prev[categorySlug],
-          expectedPercent: val,
-        },
-      }));
-    }
-  };
-
   const totalInvestment = getTotalInvestment();
-  const avgExpected = getAvgExpectedPercent();
-  const totalExpected = getTotalExpected();
   const totalProfitLoss = getTotalProfitLoss();
   const totalCurrent = getTotalCurrent();
+
+  const toggleCategory = (categorySlug: string) => {
+    setExpandedCategories((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(categorySlug)) {
+        newSet.delete(categorySlug);
+      } else {
+        newSet.add(categorySlug);
+      }
+      return newSet;
+    });
+  };
+
+  // Calculate current value for each entry - use entry's currentValue if available, otherwise calculate proportionally
+  const getEntryCurrentValue = (entry: { invested: number; currentValue?: number }, category: Category) => {
+    if (entry.currentValue !== undefined && entry.currentValue !== null) {
+      return entry.currentValue;
+    }
+    // Fallback to proportional calculation if no currentValue set
+    const totalInvested = category.entries.reduce((sum, e) => sum + e.invested, 0);
+    if (totalInvested === 0) return 0;
+    return (entry.invested / totalInvested) * category.currentValue;
+  };
 
   const handleExport = () => {
     const exportData: CategoryExport[] = categories.map((cat) => {
       const totalInvested = cat.entries.reduce((sum, entry) => sum + entry.invested, 0);
-      const expectedAmt = totalInvested * (1 + cat.expectedPercent / 100);
+      const expectedPercent = getCategoryExpectedPercent(cat);
+      const expectedAmt = totalInvested * (1 + expectedPercent / 100);
       const profitLoss = cat.currentValue - expectedAmt;
       const profitLossPercent = totalInvested > 0 ? ((profitLoss / totalInvested) * 100) : 0;
 
@@ -480,6 +434,20 @@ export default function DashboardPage() {
                             </button>
                           </TableHead>
                           <TableHead className="text-right font-bold text-[10px] sm:text-xs lg:text-sm uppercase tracking-wider text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6 whitespace-nowrap">
+                            <span className="hidden sm:inline">Current Value</span>
+                            <span className="sm:hidden">Current</span>
+                          </TableHead>
+                          <TableHead className="text-right font-bold text-[10px] sm:text-xs lg:text-sm uppercase tracking-wider text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6 whitespace-nowrap">
+                            <button
+                              onClick={() => handleSort("profitLoss")}
+                              className="flex items-center justify-end ml-auto hover:text-primary transition-colors"
+                            >
+                              <span className="hidden sm:inline">Profit/Loss</span>
+                              <span className="sm:hidden">P/L</span>
+                              {getSortIcon("profitLoss")}
+                            </button>
+                          </TableHead>
+                          <TableHead className="text-right font-bold text-[10px] sm:text-xs lg:text-sm uppercase tracking-wider text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6 whitespace-nowrap">
                             <button
                               onClick={() => handleSort("expectedPercent")}
                               className="flex items-center justify-end ml-auto hover:text-primary transition-colors"
@@ -494,42 +462,18 @@ export default function DashboardPage() {
                               onClick={() => handleSort("expectedAmt")}
                               className="flex items-center justify-end ml-auto hover:text-primary transition-colors"
                             >
-                              <span className="hidden lg:inline">Expected Amount</span>
-                              <span className="lg:hidden hidden sm:inline">Exp Amt</span>
+                              <span className="hidden lg:inline">Expected Value</span>
+                              <span className="lg:hidden hidden sm:inline">Exp Val</span>
                               <span className="sm:hidden">Exp</span>
                               {getSortIcon("expectedAmt")}
                             </button>
-                          </TableHead>
-                          <TableHead className="text-right font-bold text-[10px] sm:text-xs lg:text-sm uppercase tracking-wider text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6 whitespace-nowrap">
-                            <button
-                              onClick={() => handleSort("profitLoss")}
-                              className="flex items-center justify-end ml-auto hover:text-primary transition-colors"
-                            >
-                              <span className="hidden sm:inline">Profit/Loss</span>
-                              <span className="sm:hidden">P/L</span>
-                              {getSortIcon("profitLoss")}
-                            </button>
-                          </TableHead>
-                          <TableHead className="text-right font-bold text-[10px] sm:text-xs lg:text-sm uppercase tracking-wider text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6 whitespace-nowrap">
-                            <button
-                              onClick={() => handleSort("currentValue")}
-                              className="flex items-center justify-end ml-auto hover:text-primary transition-colors"
-                            >
-                              <span className="hidden sm:inline">Current Value</span>
-                              <span className="sm:hidden">Cur</span>
-                              {getSortIcon("currentValue")}
-                            </button>
-                          </TableHead>
-                          <TableHead className="text-center font-bold text-[10px] sm:text-xs lg:text-sm uppercase tracking-wider text-gray-700 dark:text-gray-300 py-2 px-1 sm:py-3 sm:px-2 lg:px-6 whitespace-nowrap">
-                            <span className="hidden sm:inline">Actions</span>
-                            <span className="sm:hidden">Act</span>
                           </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {sortedData.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                            <TableCell colSpan={6} className="text-center py-8 text-gray-500 dark:text-gray-400">
                               {categories.length === 0
                                 ? "No categories found. Create one in the Categories page."
                                 : "No categories found matching your search."}
@@ -539,112 +483,178 @@ export default function DashboardPage() {
                           sortedData.map((row) => {
                             const categorySlug = row.categorySlug;
                             const category = categories.find((cat) => cat.slug === categorySlug);
-                            const isEditing = editingSlug === categorySlug;
+                            const isExpanded = expandedCategories.has(categorySlug);
 
                             return (
-                              <TableRow key={row.categoryName}>
-                                <TableCell className="font-semibold text-gray-900 dark:text-gray-100 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
-                                  <Link
-                                    href={`/categories/${categorySlug}`}
-                                    className="text-primary hover:text-primary/80 hover:underline transition-all cursor-pointer font-semibold text-[10px] sm:text-xs lg:text-sm"
-                                  >
-                                    <span className="truncate block max-w-[80px] sm:max-w-none">{row.sheetName}</span>
-                                  </Link>
-                                </TableCell>
-                                <TableCell className="text-right font-medium text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
-                                  <div className="text-right text-[10px] sm:text-xs lg:text-sm">{formatCurrency(row.valueFromC20)}</div>
-                                </TableCell>
-                                <TableCell className="text-right py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
-                                  {isEditing ? (
-                                    <div className="flex justify-end">
-                                      <Input
-                                        type="text"
-                                        value={editingValues[categorySlug]?.expectedPercent ?? (category ? category.expectedPercent.toString() : row.expectedPercent.toString())}
-                                        onChange={(e) => handleUpdateEditingValue(categorySlug, "expectedPercent", e.target.value)}
-                                        onKeyDown={(e) => {
-                                          if (e.key === "Enter") {
-                                            e.preventDefault();
-                                            handleSave(categorySlug);
-                                          }
-                                        }}
-                                        className="w-12 sm:w-16 lg:w-20 text-right text-[10px] sm:text-xs lg:text-sm border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-1 focus:ring-primary h-7 sm:h-8 lg:h-10"
-                                        disabled={saving}
-                                        autoFocus
-                                      />
-                                    </div>
-                                  ) : (
-                                    <div className="text-right font-medium text-gray-700 dark:text-gray-300 text-[10px] sm:text-xs lg:text-sm">
-                                      {formatPercent(row.expectedPercent)}
-                                    </div>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-right font-medium text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
-                                  <div className="text-right text-[10px] sm:text-xs lg:text-sm">{formatCurrency(row.expectedAmt)}</div>
-                                </TableCell>
-                                <TableCell className={`text-right font-semibold py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6 ${row.profitLoss >= 0
-                                  ? "text-green-600 dark:text-green-400"
-                                  : "text-red-600 dark:text-red-400"
-                                  }`}>
-                                  <div className="text-right text-[10px] sm:text-xs lg:text-sm">{formatCurrency(row.profitLoss)}</div>
-                                </TableCell>
-                                <TableCell className="text-right py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
-                                  {isEditing ? (
-                                    <div className="flex justify-end">
-                                      <Input
-                                        type="text"
-                                        value={editingValues[categorySlug]?.currentValue ?? (category ? formatNumberWithCommas(category.currentValue) : formatNumberWithCommas(row.currentValue))}
-                                        onChange={(e) => handleUpdateEditingValue(categorySlug, "currentValue", e.target.value)}
-                                        onKeyDown={(e) => {
-                                          if (e.key === "Enter") {
-                                            e.preventDefault();
-                                            handleSave(categorySlug);
-                                          }
-                                        }}
-                                        className="w-16 sm:w-24 lg:w-32 text-right text-[10px] sm:text-xs lg:text-sm border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-1 focus:ring-primary h-7 sm:h-8 lg:h-10"
-                                        disabled={saving}
-                                      />
-                                    </div>
-                                  ) : (
-                                    <div className="text-right font-medium text-gray-700 dark:text-gray-300 text-[10px] sm:text-xs lg:text-sm">
-                                      {formatCurrency(row.currentValue)}
-                                    </div>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-center py-2 px-1 sm:py-3 sm:px-2 lg:px-6">
-                                  {isEditing ? (
-                                    <div className="flex items-center justify-center gap-0.5 sm:gap-1 lg:gap-2">
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => handleSave(categorySlug)}
-                                        disabled={saving}
-                                        className="h-6 w-6 sm:h-7 sm:w-7 lg:h-9 lg:w-9 hover:bg-green-50 dark:hover:bg-green-900/30 hover:text-green-600 dark:hover:text-green-400 transition-colors"
+                              <>
+                                <TableRow key={row.categoryName} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/50">
+                                  <TableCell className="font-semibold text-gray-900 dark:text-gray-100 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
+                                    <div className="flex items-center gap-1.5 sm:gap-2">
+                                      <button
+                                        onClick={() => toggleCategory(categorySlug)}
+                                        className="flex items-center justify-center w-4 h-4 sm:w-5 sm:h-5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors flex-shrink-0"
+                                        aria-label={isExpanded ? "Collapse" : "Expand"}
                                       >
-                                        <Check className="h-2.5 w-2.5 sm:h-3 sm:w-3 lg:h-4 lg:w-4" />
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => handleCancelEdit(categorySlug)}
-                                        disabled={saving}
-                                        className="h-6 w-6 sm:h-7 sm:w-7 lg:h-9 lg:w-9 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                        {isExpanded ? (
+                                          <ChevronDown className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500 dark:text-gray-400" />
+                                        ) : (
+                                          <ChevronRight className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500 dark:text-gray-400" />
+                                        )}
+                                      </button>
+                                      <Link
+                                        href={`/categories/${categorySlug}`}
+                                        className="text-primary hover:text-primary/80 hover:underline transition-all cursor-pointer font-semibold text-[10px] sm:text-xs lg:text-sm"
                                       >
-                                        <X className="h-2.5 w-2.5 sm:h-3 sm:w-3 lg:h-4 lg:w-4" />
-                                      </Button>
+                                        <span className="truncate block max-w-[80px] sm:max-w-none">{row.sheetName}</span>
+                                      </Link>
                                     </div>
-                                  ) : (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => handleEdit(categorySlug)}
-                                      disabled={saving}
-                                      className="h-6 w-6 sm:h-7 sm:w-7 lg:h-9 lg:w-9 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                    >
-                                      <Pencil className="h-2.5 w-2.5 sm:h-3 sm:w-3 lg:h-4 lg:w-4" />
-                                    </Button>
-                                  )}
-                                </TableCell>
-                              </TableRow>
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
+                                    <div className="text-right text-[10px] sm:text-xs lg:text-sm">{formatCurrency(row.valueFromC20)}</div>
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
+                                    <div className="text-right text-[10px] sm:text-xs lg:text-sm">{formatCurrency(row.currentValue)}</div>
+                                  </TableCell>
+                                  <TableCell className={`text-right font-semibold py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6 ${row.profitLoss >= 0
+                                    ? "text-green-600 dark:text-green-400"
+                                    : "text-red-600 dark:text-red-400"
+                                    }`}>
+                                    <div className="text-right text-[10px] sm:text-xs lg:text-sm">{formatCurrency(row.profitLoss)}</div>
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
+                                    <div className="text-right text-[10px] sm:text-xs lg:text-sm">{formatPercent(row.expectedPercent)}</div>
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium text-gray-700 dark:text-gray-300 py-2 px-1.5 sm:py-3 sm:px-3 lg:px-6">
+                                    <div className="text-right text-[10px] sm:text-xs lg:text-sm">{formatCurrency(row.expectedAmt)}</div>
+                                  </TableCell>
+                                </TableRow>
+                                {isExpanded && category && (
+                                  <TableRow key={`${row.categoryName}-expanded`}>
+                                    <TableCell colSpan={7} className="p-0 bg-gray-50/30 dark:bg-gray-800/20 border-t border-gray-200 dark:border-gray-700">
+                                      <div className="pl-8 sm:pl-12 pr-2 sm:pr-4 py-2">
+                                        <div className="overflow-x-auto">
+                                          <Table>
+                                            <TableHeader>
+                                              <TableRow className="bg-gray-100/60 dark:bg-gray-700/60 border-b border-gray-200 dark:border-gray-600">
+                                                <TableHead className="font-semibold text-[10px] sm:text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-1.5 px-2 sm:px-3 whitespace-nowrap">
+                                                  Investment Name
+                                                </TableHead>
+                                                <TableHead className="text-right font-semibold text-[10px] sm:text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-1.5 px-2 sm:px-3 whitespace-nowrap">
+                                                  Qty
+                                                </TableHead>
+                                                <TableHead className="text-right font-semibold text-[10px] sm:text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-1.5 px-2 sm:px-3 whitespace-nowrap">
+                                                  Invested
+                                                </TableHead>
+                                                <TableHead className="text-right font-semibold text-[10px] sm:text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-1.5 px-2 sm:px-3 whitespace-nowrap">
+                                                  Current
+                                                </TableHead>
+                                                <TableHead className="text-right font-semibold text-[10px] sm:text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-1.5 px-2 sm:px-3 whitespace-nowrap">
+                                                  P/L
+                                                </TableHead>
+                                                <TableHead className="text-right font-semibold text-[10px] sm:text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-1.5 px-2 sm:px-3 whitespace-nowrap">
+                                                  Exp %
+                                                </TableHead>
+                                                <TableHead className="text-right font-semibold text-[10px] sm:text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-1.5 px-2 sm:px-3 whitespace-nowrap">
+                                                  Exp Val
+                                                </TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {category.entries.length === 0 ? (
+                                                <TableRow>
+                                                  <TableCell colSpan={7} className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs">
+                                                    No entries found
+                                                  </TableCell>
+                                                </TableRow>
+                                              ) : (
+                                                category.entries.map((entry, index) => {
+                                                  const entryCurrentValue = getEntryCurrentValue(entry, category);
+                                                  const profitLoss = entryCurrentValue - entry.invested; // Returns = Current Value - Invested Amount
+                                                  const expectedPercent = entry.expectedPercent ?? 10;
+                                                  const expectedValue = entry.invested * (1 + expectedPercent / 100);
+                                                  return (
+                                                    <TableRow key={index} className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50/30 dark:hover:bg-gray-800/20">
+                                                      <TableCell className="py-1.5 px-2 sm:px-3">
+                                                        <span className="font-medium text-[10px] sm:text-xs text-gray-900 dark:text-gray-100">{entry.name}</span>
+                                                      </TableCell>
+                                                      <TableCell className="text-right py-1.5 px-2 sm:px-3">
+                                                        <span className="text-[10px] sm:text-xs text-gray-700 dark:text-gray-300">{entry.quantity}</span>
+                                                      </TableCell>
+                                                      <TableCell className="text-right py-1.5 px-2 sm:px-3">
+                                                        <span className="text-[10px] sm:text-xs text-gray-700 dark:text-gray-300">{formatNumberWithCommas(entry.invested)}</span>
+                                                      </TableCell>
+                                                      <TableCell className="text-right py-1.5 px-2 sm:px-3">
+                                                        <span className="font-semibold text-[10px] sm:text-xs text-gray-900 dark:text-gray-100">{formatCurrency(entryCurrentValue)}</span>
+                                                      </TableCell>
+                                                      <TableCell className={`text-right py-1.5 px-2 sm:px-3`}>
+                                                        <span className={`font-semibold text-[10px] sm:text-xs ${profitLoss >= 0
+                                                          ? "text-green-600 dark:text-green-400"
+                                                          : "text-red-600 dark:text-red-400"
+                                                          }`}>
+                                                          {profitLoss >= 0 ? "+" : ""}{formatCurrency(profitLoss)}
+                                                        </span>
+                                                      </TableCell>
+                                                      <TableCell className="text-right py-1.5 px-2 sm:px-3">
+                                                        <span className="text-[10px] sm:text-xs text-gray-700 dark:text-gray-300">
+                                                          {entry.expectedPercent !== undefined && entry.expectedPercent !== null ? `${entry.expectedPercent.toFixed(1)}%` : "10.0%"}
+                                                        </span>
+                                                      </TableCell>
+                                                      <TableCell className="text-right py-1.5 px-2 sm:px-3">
+                                                        <span className="text-[10px] sm:text-xs text-gray-700 dark:text-gray-300">
+                                                          {formatCurrency(expectedValue)}
+                                                        </span>
+                                                      </TableCell>
+                                                    </TableRow>
+                                                  );
+                                                })
+                                              )}
+                                              {category.entries.length > 0 && (
+                                                <TableRow className="bg-gray-100/40 dark:bg-gray-700/40 font-semibold border-t border-gray-300 dark:border-gray-600">
+                                                  <TableCell colSpan={2} className="py-1.5 px-2 sm:px-3">
+                                                    <span className="text-[10px] sm:text-xs text-gray-900 dark:text-gray-100 font-bold">Total</span>
+                                                  </TableCell>
+                                                  <TableCell className="text-right py-1.5 px-2 sm:px-3">
+                                                    <span className="text-[10px] sm:text-xs text-gray-900 dark:text-gray-100 font-bold">
+                                                      {formatCurrency(category.entries.reduce((sum, e) => sum + e.invested, 0))}
+                                                    </span>
+                                                  </TableCell>
+                                                  <TableCell className="text-right py-1.5 px-2 sm:px-3">
+                                                    <span className="text-[10px] sm:text-xs text-gray-900 dark:text-gray-100 font-bold">
+                                                      {formatCurrency(category.currentValue)}
+                                                    </span>
+                                                  </TableCell>
+                                                  <TableCell className={`text-right py-1.5 px-2 sm:px-3`}>
+                                                    <span className={`text-[10px] sm:text-xs font-bold ${(category.currentValue - category.entries.reduce((sum, e) => sum + e.invested, 0)) >= 0
+                                                      ? "text-green-600 dark:text-green-400"
+                                                      : "text-red-600 dark:text-red-400"
+                                                      }`}>
+                                                      {(category.currentValue - category.entries.reduce((sum, e) => sum + e.invested, 0)) >= 0 ? "+" : ""}
+                                                      {formatCurrency(category.currentValue - category.entries.reduce((sum, e) => sum + e.invested, 0))}
+                                                    </span>
+                                                  </TableCell>
+                                                  <TableCell></TableCell>
+                                                  <TableCell className="text-right py-1.5 px-2 sm:px-3">
+                                                    <span className="text-[10px] sm:text-xs text-gray-900 dark:text-gray-100 font-bold">
+                                                      {(() => {
+                                                        const totalExpectedAmount = category.entries.reduce((sum, entry) => {
+                                                          const expectedPercent = entry.expectedPercent ?? 10;
+                                                          const expectedAmount = entry.invested * (1 + expectedPercent / 100);
+                                                          return sum + expectedAmount;
+                                                        }, 0);
+                                                        return formatCurrency(totalExpectedAmount);
+                                                      })()}
+                                                    </span>
+                                                  </TableCell>
+                                                </TableRow>
+                                              )}
+                                            </TableBody>
+                                          </Table>
+                                        </div>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                              </>
                             );
                           })
                         )}
@@ -658,10 +668,7 @@ export default function DashboardPage() {
                             <div className="text-right">{formatCurrency(totalInvestment)}</div>
                           </TableCell>
                           <TableCell className="text-right font-bold text-gray-900 dark:text-gray-100 py-2 sm:py-3 lg:py-5 px-1.5 sm:px-3 lg:px-6 text-[10px] sm:text-xs lg:text-sm">
-                            <div className="text-right">{formatPercent(avgExpected)}</div>
-                          </TableCell>
-                          <TableCell className="text-right font-bold text-gray-900 dark:text-gray-100 py-2 sm:py-3 lg:py-5 px-1.5 sm:px-3 lg:px-6 text-[10px] sm:text-xs lg:text-sm">
-                            <div className="text-right">{formatCurrency(totalExpected)}</div>
+                            <div className="text-right">{formatCurrency(getTotalCurrent())}</div>
                           </TableCell>
                           <TableCell className={`text-right font-bold py-2 sm:py-3 lg:py-5 px-1.5 sm:px-3 lg:px-6 text-[10px] sm:text-xs lg:text-sm ${totalProfitLoss >= 0
                             ? "text-green-600 dark:text-green-400"
@@ -670,9 +677,11 @@ export default function DashboardPage() {
                             <div className="text-right">{formatCurrency(totalProfitLoss)}</div>
                           </TableCell>
                           <TableCell className="text-right font-bold text-gray-900 dark:text-gray-100 py-2 sm:py-3 lg:py-5 px-1.5 sm:px-3 lg:px-6 text-[10px] sm:text-xs lg:text-sm">
-                            <div className="text-right">{formatCurrency(totalCurrent)}</div>
+                            <div className="text-right">{formatPercent(getAvgExpectedPercent())}</div>
                           </TableCell>
-                          <TableCell className="text-center py-2 sm:py-3 lg:py-5 px-1 sm:px-2 lg:px-6"></TableCell>
+                          <TableCell className="text-right font-bold text-gray-900 dark:text-gray-100 py-2 sm:py-3 lg:py-5 px-1.5 sm:px-3 lg:px-6 text-[10px] sm:text-xs lg:text-sm">
+                            <div className="text-right">{formatCurrency(getTotalExpected())}</div>
+                          </TableCell>
                         </TableRow>
                       </TableFooter>
                     </Table>
@@ -689,8 +698,9 @@ export default function DashboardPage() {
               <div className="grid gap-3 sm:gap-4 lg:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 {categories.map((cat) => {
                   const totalInvested = cat.entries.reduce((sum, entry) => sum + entry.invested, 0);
-                  const expectedAmt = totalInvested * (1 + cat.expectedPercent / 100);
-                  const profitLoss = cat.currentValue - expectedAmt;
+                  const expectedPercent = getCategoryExpectedPercent(cat);
+                  const expectedAmt = totalInvested * (1 + expectedPercent / 100);
+                  const profitLoss = cat.currentValue - totalInvested; // Returns = Current Value - Invested Amount (like Groww)
                   const profitPercent = totalInvested > 0 ? ((profitLoss / totalInvested) * 100) : 0;
                   const totalEntries = cat.entries.length;
                   const avgInvested = totalEntries > 0 ? totalInvested / totalEntries : 0;
@@ -711,7 +721,7 @@ export default function DashboardPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => window.open(`/categories/${cat.slug}`, '_blank')}
+                              onClick={() => router.push(`/categories/${cat.slug}`)}
                               className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-primary/10 dark:hover:bg-primary/20 hover:text-primary transition-colors flex-shrink-0"
                             >
                               <ExternalLink className="h-3 w-3 sm:h-4 sm:w-4" />
@@ -735,7 +745,7 @@ export default function DashboardPage() {
                             <div>
                               <div className="text-xs sm:text-sm text-muted-foreground mb-1">Expected %</div>
                               <div className="text-sm sm:text-base lg:text-lg font-bold text-gray-900 dark:text-gray-100">
-                                {formatPercent(cat.expectedPercent)}
+                                {formatPercent(expectedPercent)}
                               </div>
                             </div>
                             <div>

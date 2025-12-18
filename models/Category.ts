@@ -4,6 +4,8 @@ export interface IEntry {
   name: string;
   quantity: number;
   invested: number;
+  currentValue?: number;
+  expectedPercent?: number;
 }
 
 export interface ICategory extends Document {
@@ -23,6 +25,8 @@ const EntrySchema = new Schema<IEntry>({
   name: { type: String, required: true },
   quantity: { type: Number, required: true, default: 0 },
   invested: { type: Number, required: true, default: 0 },
+  currentValue: { type: Number, required: false },
+  expectedPercent: { type: Number, required: false, default: 10 },
 });
 
 const CategorySchema = new Schema<ICategory>(

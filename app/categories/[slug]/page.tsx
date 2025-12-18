@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatPercent } from "@/lib/utils";
 import { showToast } from "@/lib/toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
@@ -10,7 +10,15 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Navigation } from "@/components/navigation";
 import { motion } from "framer-motion";
-import { Plus, Trash2, Loader2, TrendingUp, DollarSign, Package, Edit2, Pencil, Check, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, Loader2, TrendingUp, Package, Edit2, Pencil, Check, X, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // Helper function to format number with commas
 function formatNumberWithCommas(value: number | string): string {
@@ -33,6 +41,8 @@ interface Entry {
   name: string;
   quantity: number;
   invested: number;
+  currentValue?: number;
+  expectedPercent?: number;
 }
 
 interface Category {
@@ -53,13 +63,15 @@ export default function CategoryPage() {
   const [category, setCategory] = useState<Category | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editingValues, setEditingValues] = useState<Record<number, { name: string; quantity: string; invested: string }>>({});
-  const [newEntry, setNewEntry] = useState({ name: "", quantity: "", invested: "" });
+  const [editingValues, setEditingValues] = useState<Record<number, { name: string; quantity: string; invested: string; currentValue: string; expectedPercent: string }>>({});
+  const [newEntry, setNewEntry] = useState({ name: "", quantity: "", invested: "", currentValue: "", expectedPercent: "10" });
   const [saving, setSaving] = useState(false);
   const [displayValues, setDisplayValues] = useState<Record<number, { quantity: string; invested: string }>>({});
   const [editingCategory, setEditingCategory] = useState(false);
   const [categoryEditValues, setCategoryEditValues] = useState({ displayName: "" });
   const [showStatsCards, setShowStatsCards] = useState(false); // Mobile only - hide by default
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [entryToDelete, setEntryToDelete] = useState<number | null>(null);
 
   const fetchCategory = useCallback(async () => {
     try {
@@ -93,6 +105,10 @@ export default function CategoryPage() {
   const handleAdd = async () => {
     const quantity = parseFloat(newEntry.quantity) || 0;
     const investedNum = parseFormattedNumber(newEntry.invested);
+    // Allow 0 as a valid value, only use null if the field is empty
+    const currentValueNum = newEntry.currentValue.trim() !== "" ? parseFormattedNumber(newEntry.currentValue) : null;
+    // Default to 10% if field is empty
+    const expectedPercentNum = newEntry.expectedPercent.trim() !== "" ? parseFloat(newEntry.expectedPercent) : 10;
 
     if (!newEntry.name || quantity <= 0 || investedNum <= 0) return;
     if (!category) return;
@@ -106,12 +122,14 @@ export default function CategoryPage() {
           name: newEntry.name,
           quantity: quantity,
           invested: investedNum,
+          currentValue: currentValueNum,
+          expectedPercent: expectedPercentNum,
         }),
       });
 
       if (response.ok) {
         showToast.success("Entry added", "New entry has been added successfully");
-        setNewEntry({ name: "", quantity: "", invested: "" });
+        setNewEntry({ name: "", quantity: "", invested: "", currentValue: "", expectedPercent: "10" });
         await fetchCategory();
       } else {
         const result = await response.json();
@@ -135,6 +153,8 @@ export default function CategoryPage() {
         name: entry.name,
         quantity: String(entry.quantity),
         invested: formatNumberWithCommas(entry.invested),
+        currentValue: (entry.currentValue !== undefined && entry.currentValue !== null) ? formatNumberWithCommas(entry.currentValue) : "",
+        expectedPercent: (entry.expectedPercent !== undefined && entry.expectedPercent !== null) ? entry.expectedPercent.toString() : "10",
       },
     });
   };
@@ -155,6 +175,10 @@ export default function CategoryPage() {
 
     const quantity = parseFloat(editValues.quantity) || 0;
     const invested = parseFormattedNumber(editValues.invested);
+    // Allow 0 as a valid value, only use undefined if the field is empty
+    const currentValue = editValues.currentValue.trim() !== "" ? parseFormattedNumber(editValues.currentValue) : null;
+    // Default to 10% if field is empty
+    const expectedPercent = editValues.expectedPercent.trim() !== "" ? parseFloat(editValues.expectedPercent) : 10;
     const name = editValues.name.trim();
 
     if (!name) {
@@ -172,6 +196,8 @@ export default function CategoryPage() {
           name,
           quantity,
           invested,
+          currentValue,
+          expectedPercent,
         }),
       });
 
@@ -196,8 +222,8 @@ export default function CategoryPage() {
     }
   };
 
-  const handleUpdateEditingValue = (index: number, field: "name" | "quantity" | "invested", value: string) => {
-    if (field === "invested") {
+  const handleUpdateEditingValue = (index: number, field: "name" | "quantity" | "invested" | "currentValue" | "expectedPercent", value: string) => {
+    if (field === "invested" || field === "currentValue") {
       let val = value.replace(/[^0-9,]/g, "");
       const numStr = val.replace(/,/g, "");
       if (numStr) {
@@ -210,16 +236,16 @@ export default function CategoryPage() {
         ...prev,
         [index]: {
           ...prev[index],
-          invested: val,
+          [field]: val,
         },
       }));
-    } else if (field === "quantity") {
+    } else if (field === "quantity" || field === "expectedPercent") {
       const val = value.replace(/[^0-9.]/g, "");
       setEditingValues((prev) => ({
         ...prev,
         [index]: {
           ...prev[index],
-          quantity: val,
+          [field]: val,
         },
       }));
     } else {
@@ -233,12 +259,18 @@ export default function CategoryPage() {
     }
   };
 
-  const handleDelete = async (entryIndex: number) => {
-    if (!category) return;
+  const handleDeleteClick = (entryIndex: number) => {
+    setEntryToDelete(entryIndex);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!category || entryToDelete === null) return;
 
     try {
       setSaving(true);
-      const response = await fetch(`/api/categories/${slug}/entries?entryIndex=${entryIndex}`, {
+      setDeleteDialogOpen(false);
+      const response = await fetch(`/api/categories/${slug}/entries?entryIndex=${entryToDelete}`, {
         method: "DELETE",
       });
 
@@ -254,6 +286,7 @@ export default function CategoryPage() {
       showToast.error("Delete failed", "Error deleting entry. Please try again.");
     } finally {
       setSaving(false);
+      setEntryToDelete(null);
     }
   };
 
@@ -335,8 +368,34 @@ export default function CategoryPage() {
   const total = category.entries.reduce((sum, entry) => sum + entry.invested, 0);
   const displayName = category.displayName || category.name;
   const avgInvested = category.entries.length > 0 ? total / category.entries.length : 0;
-  const profitLoss = category.currentValue - total;
+
+  // Calculate weighted expected percentage for the category based on its entries
+  const getCategoryExpectedPercent = (): number => {
+    if (total === 0) return 10; // Default to 10% if no investments
+
+    // Calculate weighted average based on invested amounts
+    const weightedSum = category.entries.reduce((sum, entry) => {
+      const expectedPercent = entry.expectedPercent ?? 10; // Default to 10% if not set
+      return sum + (entry.invested * expectedPercent);
+    }, 0);
+
+    return weightedSum / total;
+  };
+
+  // Calculate profit/loss like Groww: Returns = Current Value - Invested Amount
+  const profitLoss = category.currentValue - total; // Profit/Loss = Current Value - Total Invested
   const profitPercent = total > 0 ? ((profitLoss / total) * 100) : 0;
+
+  // Calculate current value for each entry - use entry's currentValue if available (including 0), otherwise calculate proportionally
+  const getEntryCurrentValue = (entry: Entry) => {
+    // Check if currentValue is explicitly set (including 0) vs undefined/null
+    if (entry.currentValue !== undefined && entry.currentValue !== null) {
+      return entry.currentValue;
+    }
+    // Fallback to proportional calculation if no currentValue set
+    if (total === 0) return 0;
+    return (entry.invested / total) * category.currentValue;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
@@ -365,7 +424,7 @@ export default function CategoryPage() {
                       onClick={handleSaveCategory}
                       disabled={saving}
                       size="sm"
-                      className="hover:bg-green-600 dark:hover:bg-green-700"
+                      className="hover:bg-green-600 dark:hover:bg-green-700 dark:bg-green-600 dark:text-white"
                     >
                       <Check className="h-4 w-4 mr-2" />
                       Save
@@ -375,6 +434,7 @@ export default function CategoryPage() {
                       disabled={saving}
                       variant="outline"
                       size="sm"
+                      className="dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/50"
                     >
                       <X className="h-4 w-4 mr-2" />
                       Cancel
@@ -433,8 +493,8 @@ export default function CategoryPage() {
                       <p className="text-xl sm:text-2xl font-bold text-blue-900 dark:text-blue-100">{formatCurrency(total)}</p>
                       <div className="h-5"></div>
                     </div>
-                    <div className="p-3 rounded-full bg-blue-200/50 dark:bg-blue-800/50 flex-shrink-0">
-                      <DollarSign className="h-5 w-5 sm:h-6 sm:w-6 text-blue-700 dark:text-blue-300" />
+                    <div className="p-3 rounded-full bg-blue-200/50 dark:bg-blue-800/50 flex-shrink-0 flex items-center justify-center">
+                      <span className="text-2xl sm:text-3xl font-bold text-blue-700 dark:text-blue-300">₹</span>
                     </div>
                   </div>
                 </CardContent>
@@ -520,8 +580,8 @@ export default function CategoryPage() {
           </div>
 
           {/* Table Section */}
-          <Card className="shadow-xl border-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100/50 dark:from-gray-800 dark:to-gray-700/50 border-b border-gray-200 dark:border-gray-700 px-4 sm:px-6 py-4">
+          <Card className="shadow-xl border-0 bg-white/80 dark:bg-gray-800/90 backdrop-blur-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+            <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100/50 dark:from-gray-800/90 dark:to-gray-700/90 border-b border-gray-200 dark:border-gray-600 px-4 sm:px-6 py-4">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
                   <CardTitle className="text-xl sm:text-2xl font-bold break-words text-gray-900 dark:text-gray-100">Holdings</CardTitle>
@@ -545,11 +605,8 @@ export default function CategoryPage() {
                       const editValues = editingValues[index];
 
                       return (
-                        <motion.div
+                        <div
                           key={index}
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          transition={{ delay: index * 0.05 }}
                           className="p-3 space-y-2"
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -558,7 +615,7 @@ export default function CategoryPage() {
                                 <Input
                                   value={editValues?.name ?? entry.name}
                                   onChange={(e) => handleUpdateEditingValue(index, "name", e.target.value)}
-                                  className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 font-medium bg-transparent dark:bg-transparent text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
+                                  className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 font-medium bg-white dark:bg-gray-800/50 text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
                                   placeholder="Investment name"
                                 />
                               ) : (
@@ -573,7 +630,7 @@ export default function CategoryPage() {
                                     size="icon"
                                     onClick={() => handleSave(index)}
                                     disabled={saving}
-                                    className="h-7 w-7 hover:bg-green-50 dark:hover:bg-green-900/30 hover:text-green-600 dark:hover:text-green-400"
+                                    className="h-7 w-7 hover:bg-green-50 dark:hover:bg-green-900/40 hover:text-green-600 dark:hover:text-green-400 dark:text-gray-300"
                                   >
                                     <Check className="h-3.5 w-3.5" />
                                   </Button>
@@ -582,7 +639,7 @@ export default function CategoryPage() {
                                     size="icon"
                                     onClick={() => handleCancelEdit(index)}
                                     disabled={saving}
-                                    className="h-7 w-7 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                    className="h-7 w-7 hover:bg-gray-100 dark:hover:bg-gray-700/80 dark:text-gray-300"
                                   >
                                     <X className="h-3.5 w-3.5" />
                                   </Button>
@@ -594,16 +651,16 @@ export default function CategoryPage() {
                                     size="icon"
                                     onClick={() => handleEdit(index)}
                                     disabled={saving}
-                                    className="h-7 w-7 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400"
+                                    className="h-7 w-7 hover:bg-blue-50 dark:hover:bg-blue-900/40 hover:text-blue-600 dark:hover:text-blue-400 dark:text-gray-300"
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
                                   </Button>
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    onClick={() => handleDelete(index)}
+                                    onClick={() => handleDeleteClick(index)}
                                     disabled={saving}
-                                    className="h-7 w-7 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400"
+                                    className="h-7 w-7 hover:bg-red-50 dark:hover:bg-red-900/40 hover:text-red-600 dark:hover:text-red-400 dark:text-gray-300"
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </Button>
@@ -611,7 +668,7 @@ export default function CategoryPage() {
                               )}
                             </div>
                           </div>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-4 gap-2">
                             <div>
                               <p className="text-xs text-muted-foreground mb-0.5">Qty</p>
                               {isEditing ? (
@@ -619,7 +676,7 @@ export default function CategoryPage() {
                                   type="text"
                                   value={editValues?.quantity ?? String(entry.quantity)}
                                   onChange={(e) => handleUpdateEditingValue(index, "quantity", e.target.value)}
-                                  className="w-full text-right border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 bg-transparent dark:bg-transparent text-foreground text-xs focus:border-primary focus:ring-1 focus:ring-primary"
+                                  className="w-full text-right border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-800/50 text-foreground text-xs focus:border-primary focus:ring-1 focus:ring-primary"
                                   placeholder="0"
                                 />
                               ) : (
@@ -633,15 +690,77 @@ export default function CategoryPage() {
                                   type="text"
                                   value={editValues?.invested ?? formatNumberWithCommas(entry.invested)}
                                   onChange={(e) => handleUpdateEditingValue(index, "invested", e.target.value)}
-                                  className="w-full text-right border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 bg-transparent dark:bg-transparent text-foreground text-xs focus:border-primary focus:ring-1 focus:ring-primary"
+                                  className="w-full text-right border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-800/50 text-foreground text-xs focus:border-primary focus:ring-1 focus:ring-primary"
                                   placeholder="0"
                                 />
                               ) : (
                                 <p className="font-medium text-xs text-gray-900 dark:text-gray-100">{formatCurrency(entry.invested)}</p>
                               )}
                             </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-0.5">Current</p>
+                              {isEditing ? (
+                                <Input
+                                  type="text"
+                                  value={editValues?.currentValue ?? formatNumberWithCommas(getEntryCurrentValue(entry))}
+                                  onChange={(e) => handleUpdateEditingValue(index, "currentValue", e.target.value)}
+                                  className="w-full text-right border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-800/50 text-foreground text-xs focus:border-primary focus:ring-1 focus:ring-primary"
+                                  placeholder="0"
+                                />
+                              ) : (
+                                <p className="font-medium text-xs text-gray-900 dark:text-gray-100">{formatCurrency(getEntryCurrentValue(entry))}</p>
+                              )}
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-0.5">P/L</p>
+                              {(() => {
+                                const entryCurrentValue = getEntryCurrentValue(entry);
+                                const profitLoss = entryCurrentValue - entry.invested; // Returns = Current Value - Invested Amount
+                                return (
+                                  <p className={`font-semibold text-xs ${profitLoss >= 0
+                                    ? "text-green-600 dark:text-green-400"
+                                    : "text-red-600 dark:text-red-400"
+                                    }`}>
+                                    {profitLoss >= 0 ? "+" : ""}{formatCurrency(profitLoss)}
+                                  </p>
+                                );
+                              })()}
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-0.5">Exp %</p>
+                              {isEditing ? (
+                                <Input
+                                  type="text"
+                                  value={editValues?.expectedPercent ?? ""}
+                                  onChange={(e) => handleUpdateEditingValue(index, "expectedPercent", e.target.value)}
+                                  onBlur={(e) => {
+                                    if (!e.target.value.trim()) {
+                                      handleUpdateEditingValue(index, "expectedPercent", "10");
+                                    }
+                                  }}
+                                  className="w-full text-right border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-800/50 text-foreground text-xs focus:border-primary focus:ring-1 focus:ring-primary"
+                                  placeholder="10"
+                                />
+                              ) : (
+                                <p className="font-medium text-xs text-gray-900 dark:text-gray-100">
+                                  {entry.expectedPercent !== undefined && entry.expectedPercent !== null ? `${entry.expectedPercent.toFixed(1)}%` : "10.0%"}
+                                </p>
+                              )}
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-0.5">Exp Val</p>
+                              {(() => {
+                                const expectedPercent = entry.expectedPercent ?? 10;
+                                const expectedValue = entry.invested * (1 + expectedPercent / 100);
+                                return (
+                                  <p className="font-medium text-xs text-gray-900 dark:text-gray-100">
+                                    {formatCurrency(expectedValue)}
+                                  </p>
+                                );
+                              })()}
+                            </div>
                           </div>
-                        </motion.div>
+                        </div>
                       );
                     })}
                   </div>
@@ -654,7 +773,7 @@ export default function CategoryPage() {
                   <div className="overflow-hidden">
                     <Table>
                       <TableHeader>
-                        <TableRow className="bg-gray-50/80 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700">
+                        <TableRow className="bg-gray-50/80 dark:bg-gray-800/90 border-b border-gray-200 dark:border-gray-600">
                           <TableHead className="font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-3 px-3 sm:px-6 whitespace-nowrap">
                             <span className="hidden sm:inline">Investment Name</span>
                             <span className="sm:hidden">Name</span>
@@ -666,8 +785,21 @@ export default function CategoryPage() {
                             <span className="hidden sm:inline">Invested Amount</span>
                             <span className="sm:hidden">Invested</span>
                           </TableHead>
-                          <TableHead className="text-right font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-3 px-3 sm:px-6 whitespace-nowrap hidden sm:table-cell">
-                            Total Value
+                          <TableHead className="text-right font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-3 px-3 sm:px-6 whitespace-nowrap">
+                            <span className="hidden sm:inline">Current Value</span>
+                            <span className="sm:hidden">Current</span>
+                          </TableHead>
+                          <TableHead className="text-right font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-3 px-3 sm:px-6 whitespace-nowrap">
+                            <span className="hidden sm:inline">Profit/Loss</span>
+                            <span className="sm:hidden">P/L</span>
+                          </TableHead>
+                          <TableHead className="text-right font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-3 px-3 sm:px-6 whitespace-nowrap">
+                            <span className="hidden sm:inline">Expected %</span>
+                            <span className="sm:hidden">Exp %</span>
+                          </TableHead>
+                          <TableHead className="text-right font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-3 px-3 sm:px-6 whitespace-nowrap">
+                            <span className="hidden sm:inline">Expected Value</span>
+                            <span className="sm:hidden">Exp Val</span>
                           </TableHead>
                           <TableHead className="text-center font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300 py-3 px-3 sm:px-6 whitespace-nowrap">
                             Actions
@@ -677,7 +809,7 @@ export default function CategoryPage() {
                       <TableBody>
                         {category.entries.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={5} className="text-center py-12">
+                            <TableCell colSpan={8} className="text-center py-12">
                               <div className="flex flex-col items-center gap-3">
                                 <Package className="h-12 w-12 text-gray-300 dark:text-gray-600" />
                                 <p className="text-gray-500 dark:text-gray-400 font-medium">No entries found</p>
@@ -691,19 +823,16 @@ export default function CategoryPage() {
                             const editValues = editingValues[index];
 
                             return (
-                              <motion.tr
+                              <TableRow
                                 key={index}
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                transition={{ delay: index * 0.05 }}
-                                className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors"
+                                className="border-b border-gray-100 dark:border-gray-700/80 hover:bg-gray-50/50 dark:hover:bg-gray-800/70 transition-colors"
                               >
                                 <TableCell className="py-3 px-3 sm:px-6">
                                   {isEditing ? (
                                     <Input
                                       value={editValues?.name ?? entry.name}
                                       onChange={(e) => handleUpdateEditingValue(index, "name", e.target.value)}
-                                      className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 font-medium bg-transparent dark:bg-transparent text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
+                                      className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 font-medium bg-white dark:bg-gray-800/50 text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
                                       placeholder="Investment name"
                                     />
                                   ) : (
@@ -717,7 +846,7 @@ export default function CategoryPage() {
                                         type="text"
                                         value={editValues?.quantity ?? String(entry.quantity)}
                                         onChange={(e) => handleUpdateEditingValue(index, "quantity", e.target.value)}
-                                        className="w-16 sm:w-24 text-right border border-gray-200 dark:border-gray-700 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 bg-transparent dark:bg-transparent text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
+                                        className="w-16 sm:w-24 text-right border border-gray-200 dark:border-gray-600 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 bg-white dark:bg-gray-800/50 text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
                                         placeholder="0"
                                       />
                                     </div>
@@ -732,7 +861,7 @@ export default function CategoryPage() {
                                         type="text"
                                         value={editValues?.invested ?? formatNumberWithCommas(entry.invested)}
                                         onChange={(e) => handleUpdateEditingValue(index, "invested", e.target.value)}
-                                        className="w-24 sm:w-32 text-right border border-gray-200 dark:border-gray-700 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 bg-transparent dark:bg-transparent text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
+                                        className="w-24 sm:w-32 text-right border border-gray-200 dark:border-gray-600 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 bg-white dark:bg-gray-800/50 text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
                                         placeholder="0"
                                       />
                                     </div>
@@ -740,8 +869,67 @@ export default function CategoryPage() {
                                     <span className="font-medium text-xs sm:text-sm text-gray-700 dark:text-gray-300">{formatNumberWithCommas(entry.invested)}</span>
                                   )}
                                 </TableCell>
-                                <TableCell className="text-right font-medium text-gray-700 dark:text-gray-300 py-3 px-3 sm:px-6 hidden sm:table-cell">
-                                  <span className="font-semibold text-sm sm:text-base text-gray-900 dark:text-gray-100">{formatCurrency(entry.invested)}</span>
+                                <TableCell className="text-right py-3 px-3 sm:px-6">
+                                  {isEditing ? (
+                                    <div className="flex justify-end">
+                                      <Input
+                                        type="text"
+                                        value={editValues?.currentValue ?? formatNumberWithCommas(getEntryCurrentValue(entry))}
+                                        onChange={(e) => handleUpdateEditingValue(index, "currentValue", e.target.value)}
+                                        className="w-24 sm:w-32 text-right border border-gray-200 dark:border-gray-600 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 bg-white dark:bg-gray-800/50 text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
+                                        placeholder="0"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <span className="font-semibold text-xs sm:text-sm text-gray-900 dark:text-gray-100">{formatCurrency(getEntryCurrentValue(entry))}</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right py-3 px-3 sm:px-6">
+                                  {(() => {
+                                    const entryCurrentValue = getEntryCurrentValue(entry);
+                                    const profitLoss = entryCurrentValue - entry.invested; // Returns = Current Value - Invested Amount
+                                    return (
+                                      <span className={`font-semibold text-xs sm:text-sm ${profitLoss >= 0
+                                        ? "text-green-600 dark:text-green-400"
+                                        : "text-red-600 dark:text-red-400"
+                                        }`}>
+                                        {profitLoss >= 0 ? "+" : ""}{formatCurrency(profitLoss)}
+                                      </span>
+                                    );
+                                  })()}
+                                </TableCell>
+                                <TableCell className="text-right py-3 px-3 sm:px-6">
+                                  {isEditing ? (
+                                    <div className="flex justify-end">
+                                      <Input
+                                        type="text"
+                                        value={editValues?.expectedPercent ?? ""}
+                                        onChange={(e) => handleUpdateEditingValue(index, "expectedPercent", e.target.value)}
+                                        onBlur={(e) => {
+                                          if (!e.target.value.trim()) {
+                                            handleUpdateEditingValue(index, "expectedPercent", "10");
+                                          }
+                                        }}
+                                        className="w-16 sm:w-20 text-right border border-gray-200 dark:border-gray-600 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 bg-white dark:bg-gray-800/50 text-foreground text-sm focus:border-primary focus:ring-1 focus:ring-primary"
+                                        placeholder="10"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <span className="font-medium text-xs sm:text-sm text-gray-700 dark:text-gray-300">
+                                      {entry.expectedPercent !== undefined && entry.expectedPercent !== null ? `${entry.expectedPercent.toFixed(1)}%` : "10.0%"}
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right py-3 px-3 sm:px-6">
+                                  {(() => {
+                                    const expectedPercent = entry.expectedPercent ?? 10;
+                                    const expectedValue = entry.invested * (1 + expectedPercent / 100);
+                                    return (
+                                      <span className="font-medium text-xs sm:text-sm text-gray-700 dark:text-gray-300">
+                                        {formatCurrency(expectedValue)}
+                                      </span>
+                                    );
+                                  })()}
                                 </TableCell>
                                 <TableCell className="text-center py-3 px-3 sm:px-6">
                                   <div className="flex items-center justify-center gap-1">
@@ -752,7 +940,7 @@ export default function CategoryPage() {
                                           size="icon"
                                           onClick={() => handleSave(index)}
                                           disabled={saving}
-                                          className="h-8 w-8 sm:h-9 sm:w-9 hover:bg-green-50 dark:hover:bg-green-900/30 hover:text-green-600 dark:hover:text-green-400 transition-colors"
+                                          className="h-8 w-8 sm:h-9 sm:w-9 hover:bg-green-50 dark:hover:bg-green-900/40 hover:text-green-600 dark:hover:text-green-400 dark:text-gray-300 transition-colors"
                                         >
                                           <Check className="h-3 w-3 sm:h-4 sm:w-4" />
                                         </Button>
@@ -761,7 +949,7 @@ export default function CategoryPage() {
                                           size="icon"
                                           onClick={() => handleCancelEdit(index)}
                                           disabled={saving}
-                                          className="h-8 w-8 sm:h-9 sm:w-9 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                          className="h-8 w-8 sm:h-9 sm:w-9 hover:bg-gray-100 dark:hover:bg-gray-700/80 dark:text-gray-300 transition-colors"
                                         >
                                           <X className="h-3 w-3 sm:h-4 sm:w-4" />
                                         </Button>
@@ -773,16 +961,16 @@ export default function CategoryPage() {
                                           size="icon"
                                           onClick={() => handleEdit(index)}
                                           disabled={saving}
-                                          className="h-8 w-8 sm:h-9 sm:w-9 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                          className="h-8 w-8 sm:h-9 sm:w-9 hover:bg-blue-50 dark:hover:bg-blue-900/40 hover:text-blue-600 dark:hover:text-blue-400 dark:text-gray-300 transition-colors"
                                         >
                                           <Pencil className="h-3 w-3 sm:h-4 sm:w-4" />
                                         </Button>
                                         <Button
                                           variant="ghost"
                                           size="icon"
-                                          onClick={() => handleDelete(index)}
+                                          onClick={() => handleDeleteClick(index)}
                                           disabled={saving}
-                                          className="h-8 w-8 sm:h-9 sm:w-9 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                          className="h-8 w-8 sm:h-9 sm:w-9 hover:bg-red-50 dark:hover:bg-red-900/40 hover:text-red-600 dark:hover:text-red-400 dark:text-gray-300 transition-colors"
                                         >
                                           <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
                                         </Button>
@@ -790,19 +978,41 @@ export default function CategoryPage() {
                                     )}
                                   </div>
                                 </TableCell>
-                              </motion.tr>
+                              </TableRow>
                             );
                           })
                         )}
                       </TableBody>
                       {category.entries.length > 0 && (
                         <TableFooter>
-                          <TableRow className="bg-gradient-to-r from-gray-50 to-gray-100/50 dark:from-gray-800 dark:to-gray-700/50 border-t-2 border-gray-200 dark:border-gray-700">
+                          <TableRow className="bg-gradient-to-r from-gray-50 to-gray-100/50 dark:from-gray-800/90 dark:to-gray-700/90 border-t-2 border-gray-200 dark:border-gray-600">
                             <TableCell colSpan={2} className="font-bold text-gray-900 dark:text-gray-100 py-4 px-6">
                               Total Investment
                             </TableCell>
-                            <TableCell colSpan={2} className="text-right font-bold text-gray-900 dark:text-gray-100 py-4 px-6 text-lg">
+                            <TableCell className="text-right font-bold text-gray-900 dark:text-gray-100 py-4 px-6 text-lg">
                               {formatCurrency(total)}
+                            </TableCell>
+                            <TableCell className="text-right font-bold text-gray-900 dark:text-gray-100 py-4 px-6 text-lg">
+                              {formatCurrency(category.currentValue)}
+                            </TableCell>
+                            <TableCell className={`text-right font-bold py-4 px-6 text-lg ${profitLoss >= 0
+                              ? "text-green-600 dark:text-green-400"
+                              : "text-red-600 dark:text-red-400"
+                              }`}>
+                              {profitLoss >= 0 ? "+" : ""}{formatCurrency(profitLoss)}
+                            </TableCell>
+                            <TableCell className="text-right font-bold text-gray-900 dark:text-gray-100 py-4 px-6 text-lg">
+                              {formatPercent(getCategoryExpectedPercent())}
+                            </TableCell>
+                            <TableCell className="text-right font-bold text-gray-900 dark:text-gray-100 py-4 px-6 text-lg">
+                              {(() => {
+                                const totalExpectedAmount = category.entries.reduce((sum, entry) => {
+                                  const expectedPercent = entry.expectedPercent ?? 10;
+                                  const expectedAmount = entry.invested * (1 + expectedPercent / 100);
+                                  return sum + expectedAmount;
+                                }, 0);
+                                return formatCurrency(totalExpectedAmount);
+                              })()}
                             </TableCell>
                             <TableCell></TableCell>
                           </TableRow>
@@ -815,7 +1025,7 @@ export default function CategoryPage() {
 
               {/* Mobile Total */}
               {category.entries.length > 0 && (
-                <div className="block sm:hidden px-3 py-2.5 bg-gray-50/50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
+                <div className="block sm:hidden px-3 py-2.5 bg-gray-50/50 dark:bg-gray-800/70 border-t border-gray-200 dark:border-gray-600">
                   <div className="flex justify-between items-center">
                     <span className="font-semibold text-sm text-gray-900 dark:text-gray-100">Total</span>
                     <span className="font-bold text-sm text-gray-900 dark:text-gray-100">{formatCurrency(total)}</span>
@@ -824,13 +1034,13 @@ export default function CategoryPage() {
               )}
 
               {/* Add Entry Form */}
-              <div className="p-3 sm:p-6 bg-gray-50/50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
+              <div className="p-3 sm:p-6 bg-gray-50/50 dark:bg-gray-800/70 border-t border-gray-200 dark:border-gray-600">
                 <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
                   <Input
                     placeholder="Investment name"
                     value={newEntry.name}
                     onChange={(e) => setNewEntry({ ...newEntry, name: e.target.value })}
-                    className="flex-1 border-gray-200 dark:border-gray-700 focus:border-primary h-9 sm:h-10 text-xs sm:text-base"
+                    className="flex-1 border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800/50 focus:border-primary h-9 sm:h-10 text-xs sm:text-base"
                   />
                   <Input
                     type="text"
@@ -840,7 +1050,7 @@ export default function CategoryPage() {
                       const val = e.target.value.replace(/[^0-9.]/g, "");
                       setNewEntry({ ...newEntry, quantity: val });
                     }}
-                    className="w-full sm:w-32 border-gray-200 dark:border-gray-700 focus:border-primary h-9 sm:h-10 text-xs sm:text-base"
+                    className="w-full sm:w-32 border-gray-200 dark:border-gray-600 focus:border-primary h-9 sm:h-10 text-xs sm:text-base"
                   />
                   <Input
                     type="text"
@@ -861,12 +1071,43 @@ export default function CategoryPage() {
                       const num = parseFormattedNumber(e.target.value);
                       setNewEntry({ ...newEntry, invested: formatNumberWithCommas(num) });
                     }}
+                    className="w-full sm:w-40 border-gray-200 dark:border-gray-600 focus:border-primary h-9 sm:h-10 text-xs sm:text-base"
+                  />
+                  <Input
+                    type="text"
+                    placeholder="Current Value (optional)"
+                    value={newEntry.currentValue}
+                    onChange={(e) => {
+                      let val = e.target.value.replace(/[^0-9,]/g, "");
+                      const numStr = val.replace(/,/g, "");
+                      if (numStr) {
+                        const num = parseFloat(numStr);
+                        if (!isNaN(num)) {
+                          val = formatNumberWithCommas(num);
+                        }
+                      }
+                      setNewEntry({ ...newEntry, currentValue: val });
+                    }}
+                    onBlur={(e) => {
+                      const num = parseFormattedNumber(e.target.value);
+                      setNewEntry({ ...newEntry, currentValue: formatNumberWithCommas(num) });
+                    }}
                     className="w-full sm:w-40 border-gray-200 dark:border-gray-700 focus:border-primary h-9 sm:h-10 text-xs sm:text-base"
+                  />
+                  <Input
+                    type="text"
+                    placeholder="Expected % (optional)"
+                    value={newEntry.expectedPercent}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9.]/g, "");
+                      setNewEntry({ ...newEntry, expectedPercent: val });
+                    }}
+                    className="w-full sm:w-32 border-gray-200 dark:border-gray-600 focus:border-primary h-9 sm:h-10 text-xs sm:text-base"
                   />
                   <Button
                     onClick={handleAdd}
                     disabled={saving}
-                    className="bg-primary hover:bg-primary/90 text-white font-medium px-3 sm:px-6 h-9 sm:h-10 text-xs sm:text-base w-full sm:w-auto"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 dark:bg-primary dark:hover:bg-primary/80 dark:text-primary-foreground font-medium px-3 sm:px-6 h-9 sm:h-10 text-xs sm:text-base w-full sm:w-auto shadow-md hover:shadow-lg transition-all disabled:opacity-50"
                   >
                     {saving ? (
                       <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2 animate-spin" />
@@ -881,6 +1122,52 @@ export default function CategoryPage() {
             </CardContent>
           </Card>
         </motion.div>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-full bg-red-100 dark:bg-red-900/30">
+                  <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                </div>
+                <DialogTitle className="text-xl">Delete Entry</DialogTitle>
+              </div>
+              <DialogDescription className="text-base pt-2">
+                Are you sure you want to delete this entry? This action cannot be undone and will permanently remove the entry and its associated data.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDeleteDialogOpen(false);
+                  setEntryToDelete(null);
+                }}
+                disabled={saving}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteConfirm}
+                disabled={saving}
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

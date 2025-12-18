@@ -16,7 +16,7 @@ interface Category {
   slug: string;
   expectedPercent: number;
   currentValue: number;
-  entries: Array<{ name: string; quantity: number; invested: number }>;
+  entries: Array<{ name: string; quantity: number; invested: number; expectedPercent?: number }>;
   displayName?: string;
   description?: string;
 }
@@ -61,6 +61,20 @@ export default function CategoriesPage() {
 
   const getCategoryTotal = (category: Category) => {
     return category.entries.reduce((sum, entry) => sum + entry.invested, 0);
+  };
+
+  // Calculate weighted expected percentage for a category based on its entries
+  const getCategoryExpectedPercent = (category: Category): number => {
+    const totalInvested = getCategoryTotal(category);
+    if (totalInvested === 0) return 10; // Default to 10% if no investments
+
+    // Calculate weighted average based on invested amounts
+    const weightedSum = category.entries.reduce((sum, entry) => {
+      const expectedPercent = entry.expectedPercent ?? 10; // Default to 10% if not set
+      return sum + (entry.invested * expectedPercent);
+    }, 0);
+
+    return weightedSum / totalInvested;
   };
 
   if (loading) {
@@ -123,6 +137,10 @@ export default function CategoriesPage() {
             <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
               {categories.map((category, index) => {
                 const total = getCategoryTotal(category);
+                const expectedPercent = getCategoryExpectedPercent(category);
+                const expectedAmount = total * (1 + expectedPercent / 100);
+                const profitLoss = category.currentValue - total; // Returns = Current Value - Invested Amount (like Groww)
+                const profitPercent = total > 0 ? ((profitLoss / total) * 100) : 0;
                 const displayName = category.displayName || category.name;
                 return (
                   <motion.div
@@ -157,13 +175,22 @@ export default function CategoriesPage() {
                             <div className="flex justify-between items-center">
                               <span className="text-xs text-muted-foreground">Expected %</span>
                               <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">
-                                {category.expectedPercent}%
+                                {expectedPercent.toFixed(1)}%
                               </span>
                             </div>
                             <div className="flex justify-between items-center">
                               <span className="text-xs text-muted-foreground">Current Value</span>
                               <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate ml-2">
                                 {formatCurrency(category.currentValue)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-muted-foreground">Profit/Loss</span>
+                              <span className={`text-xs font-semibold truncate ml-2 ${profitLoss >= 0
+                                ? "text-green-600 dark:text-green-400"
+                                : "text-red-600 dark:text-red-400"
+                                }`}>
+                                {profitLoss >= 0 ? "+" : ""}{formatCurrency(profitLoss)}
                               </span>
                             </div>
                             <div className="flex justify-between items-center">
