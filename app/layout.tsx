@@ -79,15 +79,15 @@ export const metadata: Metadata = {
       { url: "/android/ic_launcher-web.png", sizes: "512x512", type: "image/png" },
     ],
     apple: [
+      { url: "/ios/AppIcon.appiconset/Icon-App-60x60@3x.png", sizes: "180x180", type: "image/png" },
       { url: "/ios/iTunesArtwork@1x.png", sizes: "180x180", type: "image/png" },
       { url: "/ios/iTunesArtwork@2x.png", sizes: "360x360", type: "image/png" },
-      { url: "/ios/iTunesArtwork@3x.png", sizes: "540x540", type: "image/png" },
     ],
   },
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
     title: "Portfolio Tracker",
   },
   other: {
@@ -150,6 +150,27 @@ export default function RootLayout({
           id="structured-data"
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+        />
+        {/* iOS PWA Support - Register Service Worker */}
+        <Script
+          id="register-sw"
+          strategy="afterInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                  navigator.serviceWorker
+                    .register('/sw.js')
+                    .then((registration) => {
+                      console.log('Service Worker registered:', registration);
+                    })
+                    .catch((error) => {
+                      console.error('Service Worker registration failed:', error);
+                    });
+                });
+              }
+            `,
+          }}
         />
         <ThemeProvider>
           {children}
