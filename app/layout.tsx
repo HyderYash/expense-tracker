@@ -75,11 +75,13 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icon-512x512.png", sizes: "512x512", type: "image/png" },
+      { url: "/android/mipmap-xxxhdpi/ic_launcher.png", sizes: "192x192", type: "image/png" },
+      { url: "/android/ic_launcher-web.png", sizes: "512x512", type: "image/png" },
     ],
     apple: [
-      { url: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/ios/iTunesArtwork@1x.png", sizes: "180x180", type: "image/png" },
+      { url: "/ios/iTunesArtwork@2x.png", sizes: "360x360", type: "image/png" },
+      { url: "/ios/iTunesArtwork@3x.png", sizes: "540x540", type: "image/png" },
     ],
   },
   manifest: "/manifest.json",
